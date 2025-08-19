@@ -17,6 +17,41 @@ import pandas as pd
 import io
 from docx import Document
 from docx.shared import Inches
+
+def check_password():
+    """Returns `True` if user entered correct password."""
+    
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["app_password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show input for password
+        st.text_input(
+            "🔐 Enter App Password", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        st.write("*Please contact admin for access credentials*")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password not correct, show input + error
+        st.text_input(
+            "🔐 Enter App Password", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        st.error("😕 Password incorrect")
+        return False
+    else:
+        # Password correct
+        return True
 import streamlit.components.v1 as components
 
 def check_password():
@@ -1056,40 +1091,26 @@ def main():
     if mode == "📝 Single Casino" and 'single_content' in st.session_state:
         st.subheader(f"Content for: {st.session_state.single_casino_name}")
         
-        # Content display and action buttons
-        col1, col2 = st.columns([3, 1])
+        # Copy button and content display
+        content_display = st.text_area(
+            "HTML Content (Ready for CMS)",
+            value=st.session_state.single_content,
+            height=400,
+            help="Copy this HTML content and paste it into your CMS editor"
+        )
         
-        with col1:
-            # Copy button and content display
-            content_display = st.text_area(
-                "HTML Content (Ready for CMS)",
-                value=st.session_state.single_content,
-                height=400,
-                help="Copy this HTML content and paste it into your CMS editor"
-            )
+        # Download button - Create DOCX with HTML content as text
+        docx_content = create_docx_with_html_content(
+            st.session_state.single_casino_name, 
+            st.session_state.single_content
+        )
         
-        with col2:
-            st.markdown("#### Actions")
-            
-            # Download button - Create DOCX with HTML content as text
-            docx_content = create_docx_with_html_content(
-                st.session_state.single_casino_name, 
-                st.session_state.single_content
-            )
-            
-            st.download_button(
-                label="📥 Download DOCX",
-                data=docx_content,
-                file_name=f"{st.session_state.single_casino_name.replace(' ', '_')}_html_content.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
-            
-            st.markdown("---")
-            
-            # Direct copy to clipboard button
-            clipboard_html = copy_to_clipboard(st.session_state.single_content, "single")
-            components.html(clipboard_html, height=50)
+        st.download_button(
+            label="📥 Download DOCX with HTML Content",
+            data=docx_content,
+            file_name=f"{st.session_state.single_casino_name.replace(' ', '_')}_html_content.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
     
     # Bulk results display - only show in Bulk mode
     elif mode == "📊 Bulk Generation" and 'bulk_results' in st.session_state:
@@ -1142,7 +1163,7 @@ def main():
             with col3:
                 st.markdown("**Download**")
             with col4:
-                st.markdown("**Copy to Clipboard**")
+                st.markdown("**Copy Content**")
             
             st.divider()
             
@@ -1173,9 +1194,791 @@ def main():
                     )
                 
                 with col4:
-                    # Direct copy to clipboard button using JavaScript
-                    clipboard_html = copy_to_clipboard(result['content'], i)
-                    components.html(clipboard_html, height=40)
+                    # Copy content button - shows content in expandable section
+                    if st.button("📋 Copy", key=f"copy_{i}", use_container_width=True):
+                        st.session_state[f"show_content_{i}"] = not st.session_state.get(f"show_content_{i}", False)
+                
+                # Show content in expandable section when copy button is clicked
+                if st.session_state.get(f"show_content_{i}", False):
+                    with st.expander(f"HTML Content for {result['casino_name']}", expanded=True):
+                        st.text_area(
+                            "HTML Content (Click to select all and copy)",
+                            value=result['content'],
+                            height=200,
+                            key=f"content_area_{i}",
+                            help="Click in the text area, then Ctrl+A to select all, then Ctrl+C to copy"
+                        )
+                
+                # Add subtle separator between rows
+                if i < len(successful_results) - 1:
+                    st.markdown("<hr style='margin: 10px 0; border: 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
+        
+        # Error summary
+        if error_results:
+            st.divider()
+            st.subheader("❌ Generation Errors")
+            for result in error_results:
+                st.error(f"**{result['casino_name']}**: {result['status']}")
+        
+        # Summary stats
+        if successful_results or error_results:
+            st.divider()
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("✅ Successful", len(successful_results))
+            with col2:
+                st.metric("❌ Failed", len(error_results))
+            with col3:
+                st.metric("📊 Total", len(st.session_state.bulk_results))
+    
+    # Show placeholder when no content generated yet
+    elif mode == "📝 Single Casino":
+        st.info("👆 Generate content for a single casino to see results here")
+    else:  # Bulk mode with no results
+        st.info("👆 Upload a CSV file and generate bulk content to see results here")
+
+if __name__ == "__main__":
+    main(), '\\
+    """Create a DOCX file with raw HTML content as text"""
+    doc = Document()
+    
+    # Add title
+    title = doc.add_heading(f'{casino_name} - HTML Content', 0)
+    
+    # Add subtitle with timestamp
+    subtitle = doc.add_paragraph(f'Generated on: {datetime.now().strftime("%B %d, %Y at %I:%M %p")}')
+    subtitle.style = 'Subtitle'
+    
+    # Add instructions
+    instructions = doc.add_paragraph()
+    instructions.add_run('Instructions: ').bold = True
+    instructions.add_run('Copy the HTML content below and paste it directly into your CMS editor.')
+    
+    doc.add_paragraph()  # Empty line
+    
+    # Add HTML content header
+    html_header = doc.add_heading('Raw HTML Content:', level=1)
+    
+    # Add the HTML content as plain text in a monospace style
+    html_paragraph = doc.add_paragraph()
+    run = html_paragraph.add_run(html_content)
+    run.font.name = 'Courier New'  # Monospace font for code
+    run.font.size = Inches(0.08)  # Smaller font size
+    
+    # Save to bytes buffer
+    doc_buffer = io.BytesIO()
+    doc.save(doc_buffer)
+    doc_buffer.seek(0)
+    
+    return doc_buffer.getvalue()
+
+# Streamlit App
+def main():
+    st.set_page_config(
+        page_title="Casino Content Generator",
+        page_icon="🎰",
+        layout="wide"
+    )
+    
+    # 🔐 AUTHENTICATION CHECK
+    if not check_password():
+        st.stop()  # Do not continue if check_password is not True
+    
+    st.title("🎰 Casino Content Generator")
+    st.subheader("Generate SEO-optimized casino reviews with AI")
+    
+    # Sidebar for configuration
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        
+        # Logout button at top of sidebar
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state["password_correct"] = False
+            st.rerun()
+        
+        st.divider()
+        
+        # API Key input
+        api_key = st.text_input(
+            "OpenAI API Key",
+            type="password",
+            help="Enter your OpenAI API key"
+        )
+        
+        if not api_key:
+            st.warning("Please enter your OpenAI API key to continue")
+            return
+        
+        st.divider()
+        
+        # Mode selection
+        mode = st.radio(
+            "🎯 Generation Mode",
+            ["📝 Single Casino", "📊 Bulk Generation"],
+            help="Choose whether to generate content for one casino or multiple casinos"
+        )
+    
+    # Main content area based on mode selection
+    if mode == "📝 Single Casino":
+        st.header("📝 Single Casino Generation")
+        
+        with st.form("single_casino_form"):
+            casino_name = st.text_input("Casino Name", placeholder="e.g., Zitobox Casino")
+            keyword = st.text_input("Target Keyword", placeholder="e.g., zitobox casino promo code")
+            
+            st.subheader("Competitor URLs")
+            competitor_url_1 = st.text_input("Competitor URL 1", placeholder="https://competitor1.com/review")
+            competitor_url_2 = st.text_input("Competitor URL 2", placeholder="https://competitor2.com/review")
+            competitor_url_3 = st.text_input("Competitor URL 3", placeholder="https://competitor3.com/review")
+            
+            submitted = st.form_submit_button("🚀 Generate Content", use_container_width=True)
+            
+            if submitted:
+                if casino_name and keyword and competitor_url_1:
+                    competitor_urls = [url for url in [competitor_url_1, competitor_url_2, competitor_url_3] if url]
+                    
+                    with st.spinner("Generating content..."):
+                        try:
+                            generator = CasinoContentGenerator(api_key)
+                            
+                            start_time = time.time()
+                            content = generator.generate_full_review(casino_name, keyword, competitor_urls)
+                            end_time = time.time()
+                            
+                            st.success(f"✅ Content generated in {end_time - start_time:.1f} seconds!")
+                            
+                            # Store in session state for display
+                            st.session_state.single_content = content
+                            st.session_state.single_casino_name = casino_name
+                            
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                else:
+                    st.error("Please fill in all required fields")
+    
+    else:  # Bulk Generation mode
+        st.header("📊 Bulk Generation")
+        
+        # Example CSV download (outside of form)
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.info("Upload a CSV file with columns: casino_name, keyword, competitor_url_1, competitor_url_2, competitor_url_3")
+        
+        with col2:
+            # Create example CSV for download
+            example_data = {
+                'casino_name': ['Zitobox Casino', 'Example Casino 2'],
+                'keyword': ['zitobox casino promo code', 'example casino bonus'],
+                'competitor_url_1': ['https://competitor1.com', 'https://competitor1.com'],
+                'competitor_url_2': ['https://competitor2.com', 'https://competitor2.com'],
+                'competitor_url_3': ['https://competitor3.com', 'https://competitor3.com']
+            }
+            df_example = pd.DataFrame(example_data)
+            csv_example = df_example.to_csv(index=False)
+            
+            st.download_button(
+                label="📥 Download Example CSV",
+                data=csv_example,
+                file_name="casino_bulk_example.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        # Bulk generation form
+        with st.form("bulk_casino_form"):
+            uploaded_file = st.file_uploader("Choose CSV file", type="csv")
+            
+            bulk_submitted = st.form_submit_button("🚀 Generate Bulk Content", use_container_width=True)
+            
+            if bulk_submitted and uploaded_file:
+                try:
+                    df = pd.read_csv(uploaded_file)
+                    required_columns = ['casino_name', 'keyword', 'competitor_url_1']
+                    
+                    if all(col in df.columns for col in required_columns):
+                        st.info(f"Processing {len(df)} casinos...")
+                        
+                        generator = CasinoContentGenerator(api_key)
+                        bulk_results = []
+                        
+                        progress_bar = st.progress(0)
+                        
+                        for idx, row in df.iterrows():
+                            st.info(f"Processing: {row['casino_name']} ({idx + 1}/{len(df)})")
+                            
+                            competitor_urls = [
+                                url for url in [
+                                    row.get('competitor_url_1', ''),
+                                    row.get('competitor_url_2', ''),
+                                    row.get('competitor_url_3', '')
+                                ] if url
+                            ]
+                            
+                            try:
+                                content = generator.generate_full_review(
+                                    row['casino_name'],
+                                    row['keyword'],
+                                    competitor_urls
+                                )
+                                
+                                bulk_results.append({
+                                    'casino_name': row['casino_name'],
+                                    'keyword': row['keyword'],
+                                    'content': content,
+                                    'status': 'Success'
+                                })
+                                
+                            except Exception as e:
+                                bulk_results.append({
+                                    'casino_name': row['casino_name'],
+                                    'keyword': row['keyword'],
+                                    'content': '',
+                                    'status': f'Error: {str(e)}'
+                                })
+                            
+                            progress_bar.progress((idx + 1) / len(df))
+                        
+                        st.session_state.bulk_results = bulk_results
+                        st.success(f"✅ Bulk generation complete! {len([r for r in bulk_results if r['status'] == 'Success'])} successful, {len([r for r in bulk_results if r['status'] != 'Success'])} errors")
+                        
+                    else:
+                        st.error(f"CSV must contain columns: {required_columns}")
+                        
+                except Exception as e:
+                    st.error(f"Error reading CSV: {str(e)}")
+            
+            elif bulk_submitted:
+                st.error("Please upload a CSV file")
+    
+    # Results display - conditional based on mode
+    st.header("📄 Generated Content")
+    
+    # Single content display - only show in Single mode
+    if mode == "📝 Single Casino" and 'single_content' in st.session_state:
+        st.subheader(f"Content for: {st.session_state.single_casino_name}")
+        
+        # Copy button and content display
+        content_display = st.text_area(
+            "HTML Content (Ready for CMS)",
+            value=st.session_state.single_content,
+            height=400,
+            help="Copy this HTML content and paste it into your CMS editor"
+        )
+        
+        # Download button - Create DOCX with HTML content as text
+        docx_content = create_docx_with_html_content(
+            st.session_state.single_casino_name, 
+            st.session_state.single_content
+        )
+        
+        st.download_button(
+            label="📥 Download DOCX with HTML Content",
+            data=docx_content,
+            file_name=f"{st.session_state.single_casino_name.replace(' ', '_')}_html_content.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    
+    # Bulk results display - only show in Bulk mode
+    elif mode == "📊 Bulk Generation" and 'bulk_results' in st.session_state:
+        st.subheader("📊 Bulk Generation Results")
+        
+        # Separate successful and failed results
+        successful_results = [r for r in st.session_state.bulk_results if r['status'] == 'Success']
+        error_results = [r for r in st.session_state.bulk_results if r['status'] != 'Success']
+        
+        if successful_results:
+            # Download All button at the top
+            zip_buffer = io.BytesIO()
+            import zipfile
+            
+            with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+                for result in successful_results:
+                    # Create DOCX content for each casino
+                    docx_content = create_docx_with_html_content(
+                        result['casino_name'], 
+                        result['content']
+                    )
+                    filename = f"{result['casino_name'].replace(' ', '_')}_html_content.docx"
+                    zip_file.writestr(filename, docx_content)
+            
+            zip_buffer.seek(0)
+            
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                st.download_button(
+                    label="📦 Download All DOCX Files",
+                    data=zip_buffer.getvalue(),
+                    file_name="bulk_casino_html_content.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+            with col2:
+                st.info(f"✅ {len(successful_results)} files ready for download")
+            
+            st.divider()
+            
+            # Individual results in dataframe-like format
+            st.subheader("📋 Individual Downloads")
+            
+            # Create header row
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+            with col1:
+                st.markdown("**Casino Name**")
+            with col2:
+                st.markdown("**Keyword**")
+            with col3:
+                st.markdown("**Download**")
+            with col4:
+                st.markdown("**Copy Content**")
+            
+            st.divider()
+            
+            # Individual rows for each result
+            for i, result in enumerate(successful_results):
+                col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+                
+                with col1:
+                    st.markdown(f"**{result['casino_name']}**")
+                
+                with col2:
+                    st.markdown(f"`{result['keyword']}`")
+                
+                with col3:
+                    # Individual download button
+                    docx_content = create_docx_with_html_content(
+                        result['casino_name'], 
+                        result['content']
+                    )
+                    
+                    st.download_button(
+                        label="📥 DOCX",
+                        data=docx_content,
+                        file_name=f"{result['casino_name'].replace(' ', '_')}_html_content.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key=f"download_{i}",
+                        use_container_width=True
+                    )
+                
+                with col4:
+                    # Copy content button - shows content in expandable section
+                    if st.button("📋 Copy", key=f"copy_{i}", use_container_width=True):
+                        st.session_state[f"show_content_{i}"] = not st.session_state.get(f"show_content_{i}", False)
+                
+                # Show content in expandable section when copy button is clicked
+                if st.session_state.get(f"show_content_{i}", False):
+                    with st.expander(f"HTML Content for {result['casino_name']}", expanded=True):
+                        st.text_area(
+                            "HTML Content (Click to select all and copy)",
+                            value=result['content'],
+                            height=200,
+                            key=f"content_area_{i}",
+                            help="Click in the text area, then Ctrl+A to select all, then Ctrl+C to copy"
+                        )
+                
+                # Add subtle separator between rows
+                if i < len(successful_results) - 1:
+                    st.markdown("<hr style='margin: 10px 0; border: 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
+        
+        # Error summary
+        if error_results:
+            st.divider()
+            st.subheader("❌ Generation Errors")
+            for result in error_results:
+                st.error(f"**{result['casino_name']}**: {result['status']}")
+        
+        # Summary stats
+        if successful_results or error_results:
+            st.divider()
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("✅ Successful", len(successful_results))
+            with col2:
+                st.metric("❌ Failed", len(error_results))
+            with col3:
+                st.metric("📊 Total", len(st.session_state.bulk_results))
+    
+    # Show placeholder when no content generated yet
+    elif mode == "📝 Single Casino":
+        st.info("👆 Generate content for a single casino to see results here")
+    else:  # Bulk mode with no results
+        st.info("👆 Upload a CSV file and generate bulk content to see results here")
+
+if __name__ == "__main__":
+    main())}`;
+        
+        navigator.clipboard.writeText(content).then(function() {{
+            // Show success message
+            const button = document.getElementById('copy_btn_{button_id}');
+            const originalText = button.innerHTML;
+            button.innerHTML = '✅ Copied!';
+            button.style.background = '#28a745';
+            
+            setTimeout(function() {{
+                button.innerHTML = originalText;
+                button.style.background = '';
+            }}, 2000);
+        }}).catch(function(err) {{
+            console.error('Failed to copy: ', err);
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = content;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            const button = document.getElementById('copy_btn_{button_id}');
+            const originalText = button.innerHTML;
+            button.innerHTML = '✅ Copied!';
+            button.style.background = '#28a745';
+            
+            setTimeout(function() {{
+                button.innerHTML = originalText;
+                button.style.background = '';
+            }}, 2000);
+        }});
+    }}
+    </script>
+    
+    <button id="copy_btn_{button_id}" onclick="copyToClipboard_{button_id}()" 
+            style="background: #ff4b4b; color: white; border: none; padding: 6px 12px; 
+                   border-radius: 4px; cursor: pointer; width: 100%; font-size: 14px;">
+        📋 Copy to Clipboard
+    </button>
+    """
+    
+    return js_code
+
+def copy_to_clipboard(content, button_id):
+    """Create a JavaScript function to copy content directly to clipboard"""
+    js_code = f"""
+    <script>
+    function copyToClipboard_{button_id}() {{
+        const content = `{content.replace('`', '\\`').replace('\\', '\\\\').replace('
+    """Create a DOCX file with raw HTML content as text"""
+    doc = Document()
+    
+    # Add title
+    title = doc.add_heading(f'{casino_name} - HTML Content', 0)
+    
+    # Add subtitle with timestamp
+    subtitle = doc.add_paragraph(f'Generated on: {datetime.now().strftime("%B %d, %Y at %I:%M %p")}')
+    subtitle.style = 'Subtitle'
+    
+    # Add instructions
+    instructions = doc.add_paragraph()
+    instructions.add_run('Instructions: ').bold = True
+    instructions.add_run('Copy the HTML content below and paste it directly into your CMS editor.')
+    
+    doc.add_paragraph()  # Empty line
+    
+    # Add HTML content header
+    html_header = doc.add_heading('Raw HTML Content:', level=1)
+    
+    # Add the HTML content as plain text in a monospace style
+    html_paragraph = doc.add_paragraph()
+    run = html_paragraph.add_run(html_content)
+    run.font.name = 'Courier New'  # Monospace font for code
+    run.font.size = Inches(0.08)  # Smaller font size
+    
+    # Save to bytes buffer
+    doc_buffer = io.BytesIO()
+    doc.save(doc_buffer)
+    doc_buffer.seek(0)
+    
+    return doc_buffer.getvalue()
+
+# Streamlit App
+def main():
+    st.set_page_config(
+        page_title="Casino Content Generator",
+        page_icon="🎰",
+        layout="wide"
+    )
+    
+    st.title("🎰 Casino Content Generator")
+    st.subheader("Generate SEO-optimized casino reviews with AI")
+    
+    # Sidebar for configuration
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        
+        # API Key input
+        api_key = st.text_input(
+            "OpenAI API Key",
+            type="password",
+            help="Enter your OpenAI API key"
+        )
+        
+        if not api_key:
+            st.warning("Please enter your OpenAI API key to continue")
+            return
+        
+        st.divider()
+        
+        # Mode selection
+        mode = st.radio(
+            "🎯 Generation Mode",
+            ["📝 Single Casino", "📊 Bulk Generation"],
+            help="Choose whether to generate content for one casino or multiple casinos"
+        )
+    
+    # Main content area based on mode selection
+    if mode == "📝 Single Casino":
+        st.header("📝 Single Casino Generation")
+        
+        with st.form("single_casino_form"):
+            casino_name = st.text_input("Casino Name", placeholder="e.g., Zitobox Casino")
+            keyword = st.text_input("Target Keyword", placeholder="e.g., zitobox casino promo code")
+            
+            st.subheader("Competitor URLs")
+            competitor_url_1 = st.text_input("Competitor URL 1", placeholder="https://competitor1.com/review")
+            competitor_url_2 = st.text_input("Competitor URL 2", placeholder="https://competitor2.com/review")
+            competitor_url_3 = st.text_input("Competitor URL 3", placeholder="https://competitor3.com/review")
+            
+            submitted = st.form_submit_button("🚀 Generate Content", use_container_width=True)
+            
+            if submitted:
+                if casino_name and keyword and competitor_url_1:
+                    competitor_urls = [url for url in [competitor_url_1, competitor_url_2, competitor_url_3] if url]
+                    
+                    with st.spinner("Generating content..."):
+                        try:
+                            generator = CasinoContentGenerator(api_key)
+                            
+                            start_time = time.time()
+                            content = generator.generate_full_review(casino_name, keyword, competitor_urls)
+                            end_time = time.time()
+                            
+                            st.success(f"✅ Content generated in {end_time - start_time:.1f} seconds!")
+                            
+                            # Store in session state for display
+                            st.session_state.single_content = content
+                            st.session_state.single_casino_name = casino_name
+                            
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                else:
+                    st.error("Please fill in all required fields")
+    
+    else:  # Bulk Generation mode
+        st.header("📊 Bulk Generation")
+        
+        # Example CSV download (outside of form)
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.info("Upload a CSV file with columns: casino_name, keyword, competitor_url_1, competitor_url_2, competitor_url_3")
+        
+        with col2:
+            # Create example CSV for download
+            example_data = {
+                'casino_name': ['Zitobox Casino', 'Example Casino 2'],
+                'keyword': ['zitobox casino promo code', 'example casino bonus'],
+                'competitor_url_1': ['https://competitor1.com', 'https://competitor1.com'],
+                'competitor_url_2': ['https://competitor2.com', 'https://competitor2.com'],
+                'competitor_url_3': ['https://competitor3.com', 'https://competitor3.com']
+            }
+            df_example = pd.DataFrame(example_data)
+            csv_example = df_example.to_csv(index=False)
+            
+            st.download_button(
+                label="📥 Download Example CSV",
+                data=csv_example,
+                file_name="casino_bulk_example.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        # Bulk generation form
+        with st.form("bulk_casino_form"):
+            uploaded_file = st.file_uploader("Choose CSV file", type="csv")
+            
+            bulk_submitted = st.form_submit_button("🚀 Generate Bulk Content", use_container_width=True)
+            
+            if bulk_submitted and uploaded_file:
+                try:
+                    df = pd.read_csv(uploaded_file)
+                    required_columns = ['casino_name', 'keyword', 'competitor_url_1']
+                    
+                    if all(col in df.columns for col in required_columns):
+                        st.info(f"Processing {len(df)} casinos...")
+                        
+                        generator = CasinoContentGenerator(api_key)
+                        bulk_results = []
+                        
+                        progress_bar = st.progress(0)
+                        
+                        for idx, row in df.iterrows():
+                            st.info(f"Processing: {row['casino_name']} ({idx + 1}/{len(df)})")
+                            
+                            competitor_urls = [
+                                url for url in [
+                                    row.get('competitor_url_1', ''),
+                                    row.get('competitor_url_2', ''),
+                                    row.get('competitor_url_3', '')
+                                ] if url
+                            ]
+                            
+                            try:
+                                content = generator.generate_full_review(
+                                    row['casino_name'],
+                                    row['keyword'],
+                                    competitor_urls
+                                )
+                                
+                                bulk_results.append({
+                                    'casino_name': row['casino_name'],
+                                    'keyword': row['keyword'],
+                                    'content': content,
+                                    'status': 'Success'
+                                })
+                                
+                            except Exception as e:
+                                bulk_results.append({
+                                    'casino_name': row['casino_name'],
+                                    'keyword': row['keyword'],
+                                    'content': '',
+                                    'status': f'Error: {str(e)}'
+                                })
+                            
+                            progress_bar.progress((idx + 1) / len(df))
+                        
+                        st.session_state.bulk_results = bulk_results
+                        st.success(f"✅ Bulk generation complete! {len([r for r in bulk_results if r['status'] == 'Success'])} successful, {len([r for r in bulk_results if r['status'] != 'Success'])} errors")
+                        
+                    else:
+                        st.error(f"CSV must contain columns: {required_columns}")
+                        
+                except Exception as e:
+                    st.error(f"Error reading CSV: {str(e)}")
+            
+            elif bulk_submitted:
+                st.error("Please upload a CSV file")
+    
+    # Results display - conditional based on mode
+    st.header("📄 Generated Content")
+    
+    # Single content display - only show in Single mode
+    if mode == "📝 Single Casino" and 'single_content' in st.session_state:
+        st.subheader(f"Content for: {st.session_state.single_casino_name}")
+        
+        # Copy button and content display
+        content_display = st.text_area(
+            "HTML Content (Ready for CMS)",
+            value=st.session_state.single_content,
+            height=400,
+            help="Copy this HTML content and paste it into your CMS editor"
+        )
+        
+        # Download button - Create DOCX with HTML content as text
+        docx_content = create_docx_with_html_content(
+            st.session_state.single_casino_name, 
+            st.session_state.single_content
+        )
+        
+        st.download_button(
+            label="📥 Download DOCX with HTML Content",
+            data=docx_content,
+            file_name=f"{st.session_state.single_casino_name.replace(' ', '_')}_html_content.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    
+    # Bulk results display - only show in Bulk mode
+    elif mode == "📊 Bulk Generation" and 'bulk_results' in st.session_state:
+        st.subheader("📊 Bulk Generation Results")
+        
+        # Separate successful and failed results
+        successful_results = [r for r in st.session_state.bulk_results if r['status'] == 'Success']
+        error_results = [r for r in st.session_state.bulk_results if r['status'] != 'Success']
+        
+        if successful_results:
+            # Download All button at the top
+            zip_buffer = io.BytesIO()
+            import zipfile
+            
+            with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+                for result in successful_results:
+                    # Create DOCX content for each casino
+                    docx_content = create_docx_with_html_content(
+                        result['casino_name'], 
+                        result['content']
+                    )
+                    filename = f"{result['casino_name'].replace(' ', '_')}_html_content.docx"
+                    zip_file.writestr(filename, docx_content)
+            
+            zip_buffer.seek(0)
+            
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                st.download_button(
+                    label="📦 Download All DOCX Files",
+                    data=zip_buffer.getvalue(),
+                    file_name="bulk_casino_html_content.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+            with col2:
+                st.info(f"✅ {len(successful_results)} files ready for download")
+            
+            st.divider()
+            
+            # Individual results in dataframe-like format
+            st.subheader("📋 Individual Downloads")
+            
+            # Create header row
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+            with col1:
+                st.markdown("**Casino Name**")
+            with col2:
+                st.markdown("**Keyword**")
+            with col3:
+                st.markdown("**Download**")
+            with col4:
+                st.markdown("**Copy Content**")
+            
+            st.divider()
+            
+            # Individual rows for each result
+            for i, result in enumerate(successful_results):
+                col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+                
+                with col1:
+                    st.markdown(f"**{result['casino_name']}**")
+                
+                with col2:
+                    st.markdown(f"`{result['keyword']}`")
+                
+                with col3:
+                    # Individual download button
+                    docx_content = create_docx_with_html_content(
+                        result['casino_name'], 
+                        result['content']
+                    )
+                    
+                    st.download_button(
+                        label="📥 DOCX",
+                        data=docx_content,
+                        file_name=f"{result['casino_name'].replace(' ', '_')}_html_content.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key=f"download_{i}",
+                        use_container_width=True
+                    )
+                
+                with col4:
+                    # Copy content button - shows content in expandable section
+                    if st.button("📋 Copy", key=f"copy_{i}", use_container_width=True):
+                        st.session_state[f"show_content_{i}"] = not st.session_state.get(f"show_content_{i}", False)
+                
+                # Show content in expandable section when copy button is clicked
+                if st.session_state.get(f"show_content_{i}", False):
+                    with st.expander(f"HTML Content for {result['casino_name']}", expanded=True):
+                        st.text_area(
+                            "HTML Content (Click to select all and copy)",
+                            value=result['content'],
+                            height=200,
+                            key=f"content_area_{i}",
+                            help="Click in the text area, then Ctrl+A to select all, then Ctrl+C to copy"
+                        )
                 
                 # Add subtle separator between rows
                 if i < len(successful_results) - 1:
