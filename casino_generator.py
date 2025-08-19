@@ -891,16 +891,20 @@ def main():
         
         st.divider()
         
-        # API Key input
-        api_key = st.text_input(
-            "OpenAI API Key",
-            type="password",
-            help="Enter your OpenAI API key"
-        )
-        
-        if not api_key:
-            st.warning("Please enter your OpenAI API key to continue")
-            return
+        # API Key input - check secrets first
+        if "OPENAI_API_KEY" in st.secrets:
+            api_key = st.secrets["OPENAI_API_KEY"]
+            st.success("✅ OpenAI API Key loaded from secrets")
+        else:
+            api_key = st.text_input(
+                "OpenAI API Key",
+                type="password",
+                help="Enter your OpenAI API key"
+            )
+            
+            if not api_key:
+                st.warning("Please enter your OpenAI API key to continue")
+                return
         
         st.divider()
         
